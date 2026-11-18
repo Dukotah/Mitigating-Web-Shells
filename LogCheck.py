@@ -1,10 +1,17 @@
 import sys
 import os.path
-import csv
+import re
+import gzip
+import math
 
 
 # Script will generate a list of URL that from Apache web access log that have least unique IP address or unique user-agents
 # Written for Python 3
+#
+# Accepts Apache/nginx "combined" and "common" log format lines. Lines in common log format (no referer and
+# user-agent fields) are counted with a user-agent of "-". Blank lines, comment lines (starting with #) and lines
+# that do not parse are skipped; the number of skipped lines is reported on stderr. Files ending in .gz are read
+# with gzip. Several log files may be given; their entries are combined.
 
 # Ideal Percentage of URL to display
 #   Will display more base on matching count
@@ -13,106 +20,104 @@ urlpercentage = 0.05
 # Hold the filename for Apache web access log
 weblogfileName = None
 
-# apache log fields
-apachelogsfields = ['ip', 'identd', 'frank', 'time_part0', 'time_part1', 'request', 'status', 'size', 'referer', 'user_agent']
+# ip identd user [time] "request" status size ["referer" "user_agent"]
+# Quoted fields may contain backslash-escaped quotes (Apache writes " inside a field as \").
+LOGLINE = re.compile(
+    r'^(?P<ip>\S+) \S+ \S+ \[[^\]]*\] '
+    r'"(?P<request>(?:[^"\\]|\\.)*)" '
+    r'(?P<status>\d{3}) \S+'
+    r'(?: "(?P<referer>(?:[^"\\]|\\.)*)" "(?P<user_agent>(?:[^"\\]|\\.)*)")?'
+)
+
+
+def parse_line(line):
+    """Return (ip, url, status, user_agent) for a log line, or None if the line should be skipped."""
+    line = line.strip()
+    if not line or line.startswith('#'):
+        return None
+    m = LOGLINE.match(line)
+    if not m:
+        return None
+    url = m.group('request').partition(' ')[2].partition(' ')[0]   # extract URL from request field
+    user_agent = m.group('user_agent')
+    if user_agent is None:
+        user_agent = '-'
+    return m.group('ip'), url, int(m.group('status')), user_agent
+
+
+def _open(filename):
+    if filename.endswith('.gz'):
+        return gzip.open(filename, mode='rt', encoding='utf-8', errors='replace')
+    return open(filename, mode='r', encoding='utf-8', errors='replace')
+
+
+def count_unique(lines):
+    """Return ({url: set(ips)}, {url: set(user_agents)}, skipped) for 2xx requests, in first-seen URL order."""
+    ips = {}
+    agents = {}
+    skipped = 0
+    for line in lines:
+        parsed = parse_line(line)
+        if parsed is None:
+            if line.strip() and not line.lstrip().startswith('#'):
+                skipped += 1
+            continue
+        ip, url, status, user_agent = parsed
+        if 200 <= status <= 299:                                   # only request with status of 200 - 299
+            ips.setdefault(url, set()).add(ip)
+            agents.setdefault(url, set()).add(user_agent)
+    return ips, agents, skipped
+
+
+def least_common(counts, percentage=urlpercentage):
+    """Return URLs ordered by ascending count, cut at the count of the URL at the given percentile.
+
+    Matches the original LogCheck.py ordering: by count, then first-seen order; every URL whose count is at or
+    below the threshold count is included, so ties can make the list longer than the percentage.
+    """
+    if not counts:
+        return []
+    n = max(1, int(math.ceil(percentage * len(counts))))
+    threshold = sorted(counts.values())[n - 1]
+    return [url for c in range(0, threshold + 1) for url, cnt in counts.items() if cnt == c]
+
 
 # function output the url based on lower counts unique ip address and lower counts of unique user-agents
-def analyze_weblog(filename):
+def analyze_weblog(*filenames):
+    ips = {}
+    agents = {}
+    skipped = 0
+    for filename in filenames:
+        print("The weblog file to analyze is %s" % filename)
+        with _open(filename) as f:
+            file_ips, file_agents, file_skipped = count_unique(f)
+        for url, s in file_ips.items():
+            ips.setdefault(url, set()).update(s)
+        for url, s in file_agents.items():
+            agents.setdefault(url, set()).update(s)
+        skipped += file_skipped
+    if skipped:
+        sys.stderr.write("Skipped %d line(s) that are not in combined or common log format\n" % skipped)
 
-    uniqueurlcount = 0                    # count of unique URL in web log
-    urls = []                             # list of unique URL, also index into lists of lists of unique ip address and user-agents
-    uniqueipcount = []                    # list of unique ip address count for URL 
-    uniqueuseragentscount = []            # list of unique use agents for URL
-    iplist = []                           # list of list of ip address per unique URL to keep track of unique URL
-    useragentlist = []                    # list of list of user-agents per unique URL to keep track of unique user-agents
-    
-    print("The weblog file to analyze is %s" % filename)
-    with open(filename, mode='r') as csv_file:                    # read in web log as csv file
-        csv_reader = csv.reader(csv_file, delimiter=' ')
-        for row in csv_reader:
-     
-            # handles simple case where file has comments start with #     
-            # also skips blank lines and lines with fewer fields than expected
-            if (len(row) >= len(apachelogsfields) and row[0][:1] != '#'):
-                                                                    # extract only fields of interest from the web log
-               ipaddress = row[apachelogsfields.index('ip')]        # ip address     
-               request = row[apachelogsfields.index('request')]     # request (URL part of request) 
-               status = row[apachelogsfields.index('status')]       # user-agent
-               user_agent = row[apachelogsfields.index('user_agent')]
-    #           print('ipaddress: %s request: %s status: %s user_agent: %s' % (ipaddress, request, status, user_agent))
-               url = (request.partition(' ')[2]).partition(' ')[0]  # extract URL from request field
-    #           print ('url %s' % url)
-               if (status >= '200' and status <= '299'):            # only request with status of 200 - 299
-               
-                   if (url not in urls):                        # determine if URL is already been seen
-                       uniqueurlcount += 1                      # if not increment unique URL count
-                       urls.append(url)                         # append new URL to the unique URL list
-                       uniqueipcount.append(0)                  # append an element of zero for the unique ip count list
-                       uniqueuseragentscount.append(0)          # append an element of zero for the unique user-agents count list
-                       newiplist = []                           # new empty element list for ip address tracking per URL
-                       iplist.append(newiplist)                 # append empty list to list of list of ip per URL
-                       newuseragentlist = []                    # new empty element list for user-agents tracking per URL
-                       useragentlist.append(newuseragentlist)   # append empty list to list of list of user-agents per URL
+    print('URL with least user agents')
+    print('--------------------------')
+    for url in least_common({u: len(s) for u, s in agents.items()}):
+        print(url)
 
-                   if (user_agent not in useragentlist[urls.index(url)]):  # determine if user-agents is in the particular URL list
-                       useragentlist[urls.index(url)].append(user_agent)   # if not append user-agents to user-agents list for the particular URL list
-                       temp = uniqueuseragentscount[urls.index(url)] + 1   # also increment unique user-agents count for that URL
-                       uniqueuseragentscount[urls.index(url)] = temp
-                   if (ipaddress not in iplist[urls.index(url)]):              # determine if ip address is in the particular URL list
-                       iplist[urls.index(url)].append(ipaddress)               # if not append ip address to ip address list for the particular URL list
-                       temp = uniqueipcount[urls.index(url)] + 1               # also increment unique ip address count for that URL
-                       uniqueipcount[urls.index(url)] = temp                       
-               
-           
-#        print(urls)
-#        print('uniqueurlcount: %s' % uniqueurlcount)
-#        print(uniqueuseragentscount)
-#        print(uniqueipcount)
-#        print('amount of useragentlist: %s' %  len(uniqueuseragentscount))
-#        print('amount in the iplist: %s' % len(uniqueipcount))
-        numberofurltodisplay = urlpercentage * uniqueurlcount       # Determine line that represent percentage of URL wanted
-        intnumberofurltodisplay = int(numberofurltodisplay)
-        if (numberofurltodisplay > intnumberofurltodisplay):        # Round up 
-            intnumberofurltodisplay += 1
-        tempuniqueuseragentscount = uniqueuseragentscount.copy()    # Create a temporary copy of list of unqiue user-agents count to sort
-        tempuniqueuseragentscount.sort()
-                                                                    # Array start at 0 need to subtract -1 from index
-        useragentcounttodisplay = tempuniqueuseragentscount[(intnumberofurltodisplay -1)] # determine the count of unique user-agents to display
-        tempuniqueipcount = uniqueipcount.copy()                    # Create a temporary copy of list of unqiue ip address count to sort
-        tempuniqueipcount.sort()
-                                                                    # Array start at 0 need to subtract -1 from index
-        ipcounttodisplay = tempuniqueipcount[(intnumberofurltodisplay -1)]                # determine the count of ip address to display
-    
-        print('URL with least user agents')
-        print('--------------------------')
-        
-        for count in range (0, (useragentcounttodisplay + 1)):  # Increament thru count to count of unique user-agents to display to order url output based on count
-            index = 0
-            for elementuseragentcount in uniqueuseragentscount:         # Increment thru unique user-agents count list
-               if (elementuseragentcount == count):                     #    List URL where where user-agents is equal to count 
-                   print(urls[index])
-               index += 1
-               
-        print('URL with least IP address')         
-        print('-------------------------')           
-        
-        for count in range (0, (ipcounttodisplay + 1)):    # Increament thru count to count of unique ip address to display to order url output based on count
-            index = 0
-            for elementipcount in uniqueipcount:                        # Increment thru unique ip address count list
-               if (elementipcount == count):                            #    List URL where where user-agents is equal to count
-                   print(urls[index])
-               index += 1           
-        
+    print('URL with least IP address')
+    print('-------------------------')
+    for url in least_common({u: len(s) for u, s in ips.items()}):
+        print(url)
+
+
 if __name__ == '__main__':
-   try:
-       if len(sys.argv) == 2:                                              # Simple check if an agrument is passed (assume weblog file
-           weblogfileName=sys.argv[1]
-           print ("Web log file to read is %s" % weblogfileName)
-           if(os.path.isfile(weblogfileName)):
-                analyze_weblog(weblogfileName)             
-       else:
-           print ('Usage: python3 %s <weblogfile>' % sys.argv[0])         # Print usage statement
-   except Exception as e:
-        print("You must provide a valid filename (path) of a web logfile")
-        raise
-   
+    if len(sys.argv) < 2:
+        print('Usage: python3 %s <weblogfile> [<weblogfile> ...]' % sys.argv[0])         # Print usage statement
+        sys.exit(2)
+    missing = [name for name in sys.argv[1:] if not os.path.isfile(name)]
+    if missing:
+        print("You must provide a valid filename (path) of a web logfile: %s" % ", ".join(missing))
+        sys.exit(2)
+    for weblogfileName in sys.argv[1:]:
+        print("Web log file to read is %s" % weblogfileName)
+    analyze_weblog(*sys.argv[1:])

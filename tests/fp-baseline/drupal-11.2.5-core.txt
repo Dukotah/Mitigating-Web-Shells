@@ -1,0 +1,1 @@
+# Expected core-rule hits on a clean drupal-11.2.5 tree ("rule path" per line). Empty = no false positives.

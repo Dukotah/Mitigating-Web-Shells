@@ -1,0 +1,2 @@
+Synthetic YARA test fixture for Mitigating-Web-Shells. Inert: not a working web shell.
+<?php /* $f = urldecode('%65%63%68%6f'); */ ?>

@@ -1,0 +1,92 @@
+{
+  "core": {
+    "benign/Default.aspx": [],
+    "benign/Hello.jsp": [],
+    "benign/app.js": [],
+    "benign/contact.php": [],
+    "benign/hello.php": [],
+    "benign/index.html": [],
+    "benign/pixel.png": [],
+    "benign/style.css": [],
+    "webshell/b374k_marker.sample": [
+      "webshellArtifact"
+    ],
+    "webshell/chr_obfuscation.sample": [
+      "obfuscatedFunctionality"
+    ],
+    "webshell/dodgy_strings.sample": [],
+    "webshell/encoded_strings.sample": [],
+    "webshell/eval_base64.sample": [
+      "suspiciousFunctionality"
+    ],
+    "webshell/fopo_loader.sample": [
+      "suspiciousFunctionality"
+    ],
+    "webshell/jsp_runtime_exec.sample": [
+      "webshellArtifact"
+    ],
+    "webshell/password_md5.sample": [],
+    "webshell/pbot_markers.sample": [
+      "webshellArtifact"
+    ],
+    "webshell/php_in_gif.sample": [
+      "hiddenFunctionality"
+    ],
+    "webshell/regeorg_markers.sample": [
+      "reGeorg_Variant_Web_shell"
+    ],
+    "webshell/urldecode_hardcoded.sample": [
+      "suspiciousFunctionality"
+    ]
+  },
+  "extended": {
+    "benign/Default.aspx": [],
+    "benign/Hello.jsp": [],
+    "benign/app.js": [],
+    "benign/contact.php": [],
+    "benign/hello.php": [],
+    "benign/index.html": [],
+    "benign/pixel.png": [],
+    "benign/style.css": [],
+    "webshell/b374k_marker.sample": [
+      "possibleIndicator",
+      "webshellArtifact"
+    ],
+    "webshell/chr_obfuscation.sample": [
+      "obfuscatedFunctionality"
+    ],
+    "webshell/dodgy_strings.sample": [
+      "possibleIndicator"
+    ],
+    "webshell/encoded_strings.sample": [
+      "obfuscatedFunctionality"
+    ],
+    "webshell/eval_base64.sample": [
+      "possibleIndicator",
+      "suspiciousFunctionality"
+    ],
+    "webshell/fopo_loader.sample": [
+      "obfuscatedFunctionality",
+      "possibleIndicator",
+      "suspiciousFunctionality"
+    ],
+    "webshell/jsp_runtime_exec.sample": [
+      "webshellArtifact"
+    ],
+    "webshell/password_md5.sample": [
+      "suspiciousFunctionality"
+    ],
+    "webshell/pbot_markers.sample": [
+      "webshellArtifact"
+    ],
+    "webshell/php_in_gif.sample": [
+      "hiddenFunctionality"
+    ],
+    "webshell/regeorg_markers.sample": [
+      "reGeorg_Variant_Web_shell"
+    ],
+    "webshell/urldecode_hardcoded.sample": [
+      "suspiciousFunctionality"
+    ]
+  }
+}

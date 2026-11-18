@@ -1,0 +1,1 @@
+# Expected core-rule hits on a clean wordpress-6.8.3 tree ("rule path" per line). Empty = no false positives.

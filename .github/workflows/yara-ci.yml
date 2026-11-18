@@ -1,0 +1,108 @@
+name: yara-ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yara-python==4.5.4 pytest==8.4.2
+      - run: python -m pytest -v tests
+
+  yara:
+    name: yara ${{ matrix.version }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["3.9.0", "3.10.0","3.11.0", "4.2.3", "4.3.2", "4.5.8", "4.6.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y automake libtool make gcc pkg-config libssl-dev
+      - name: Cache YARA build
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/yara
+          key: yara-${{ matrix.version }}-${{ runner.os }}-${{ hashFiles('ci/build-yara.sh') }}
+      - name: Build YARA ${{ matrix.version }}
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash ci/build-yara.sh "${{ matrix.version }}" "$HOME/yara"
+      - name: Compile rules with yarac
+        run: |
+          mkdir -p build
+          "$HOME/yara/bin/yara" --version | tee build/YARA_VERSION
+          for s in core extended; do
+            "$HOME/yara/bin/yarac" "$s.webshell_detection.yara" "build/$s.yara.bin"
+          done
+          ls -l build
+      - name: Corpus (source rules)
+        run: |
+          for s in core extended; do
+            python3 tests/run_corpus.py --set "$s" --yara "$HOME/yara/bin/yara"
+          done
+      - name: Corpus (rules compiled by this version)
+        run: |
+          for s in core extended; do
+            python3 tests/run_corpus.py --set "$s" --yara "$HOME/yara/bin/yara" --compiled --rules "build/$s.yara.bin"
+          done
+      - name: Does the shipped .bin load in this version? (informational)
+        run: |
+          for s in core extended; do
+            if python3 tests/run_corpus.py --set "$s" --yara "$HOME/yara/bin/yara" --compiled --rules "$s.yara.bin" > /dev/null 2> err.txt; then
+              echo "::notice::$s.yara.bin loads and passes the corpus on YARA ${{ matrix.version }}"
+            else
+              echo "::warning::$s.yara.bin does not load on YARA ${{ matrix.version }}: $(head -1 err.txt)"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-rules-yara-${{ matrix.version }}
+          path: build/
+          if-no-files-found: error
+
+  yara-x:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yara-x==1.10.0
+      - name: Compile with YARA-X
+        run: python3 ci/yara_x_check.py
+
+  false-positives:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yara-python==4.5.4
+      - name: Fetch clean application trees
+        run: |
+          mkdir -p clean
+          curl -fsSL https://wordpress.org/wordpress-6.8.3.tar.gz | tar -xz -C clean
+          curl -fsSL https://ftp.drupal.org/files/projects/drupal-11.2.5.tar.gz | tar -xz -C clean
+      - name: Core rules against WordPress 6.8.3 (must equal baseline)
+        run: python3 tests/run_corpus.py --set core --tree clean/wordpress --baseline tests/fp-baseline/wordpress-6.8.3-core.txt
+      - name: Core rules against Drupal 11.2.5 (must equal baseline)
+        run: python3 tests/run_corpus.py --set core --tree clean/drupal-11.2.5 --baseline tests/fp-baseline/drupal-11.2.5-core.txt
+      - name: Extended rules hit counts (informational; extended rules expect false positives)
+        run: |
+          for t in wordpress drupal-11.2.5; do
+            python3 tests/run_corpus.py --set extended --tree "clean/$t" > "fp-$t.txt"
+            echo "$t: $(head -1 "fp-$t.txt")"
+          done
